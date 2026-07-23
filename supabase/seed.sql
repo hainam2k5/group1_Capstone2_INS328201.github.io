@@ -1,0 +1,19 @@
+-- =============================================================================
+-- (No demo data.) The system is meant to be populated by real usage:
+--   * Students register themselves (tab "Đăng ký" → Sinh viên) — all fields
+--     required. The signup trigger creates their student profile.
+--   * Advisors register with the school's secret Advisor code (tab "Đăng ký" →
+--     Cố vấn). Run `advisor-signup-code.sql` first to set that code.
+--   * When a student's `program` matches an advisor's `program`, they are auto
+--     assigned to that advisor (see `auto-assign-advisor.sql`).
+--
+-- If you previously loaded the demo rows and want a clean slate, uncomment the
+-- block below and run it once. THIS DELETES the demo profiles and everything
+-- linked to them (courses, alerts, messages…), so only use it on a demo DB.
+-- =============================================================================
+
+-- delete from public.profiles where email in (
+--   'advisor@demo.edu.vn','advisor2@demo.edu.vn',
+--   'sv001@demo.edu.vn','sv002@demo.edu.vn','sv003@demo.edu.vn',
+--   'sv004@demo.edu.vn','sv005@demo.edu.vn','sv006@demo.edu.vn'
+-- );
