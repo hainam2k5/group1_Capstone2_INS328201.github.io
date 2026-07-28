@@ -16,7 +16,8 @@ export const runtime = "nodejs";
 //   NOTIFY_FROM_NAME=Hệ thống Cảnh báo Rủi ro Học tập — VNU-IS   (optional)
 //
 // Security model:
-// - Caller must present a valid Supabase JWT of an advisor/manager (403 otherwise).
+// - Caller must present a valid Supabase JWT of an advisor/manager/teacher (403
+//   otherwise) — a teacher may mail the students of the classes they own.
 // - The client sends a studentId, NOT an email address. The recipient's email is
 //   looked up server-side through a client scoped to the CALLER's token, so RLS
 //   decides which students this advisor may reach. The endpoint cannot be used
@@ -25,8 +26,10 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  const gmailUser = process.env.GMAIL_USER?.trim();
+  // Google shows app passwords grouped as "abcd efgh ijkl mnop"; pasted as-is the
+  // spaces make SMTP reject the login (502). Strip whitespace before using it.
+  const gmailPass = process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, "");
 
   let body: any;
   try {

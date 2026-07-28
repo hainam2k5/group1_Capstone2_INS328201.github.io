@@ -1,8 +1,9 @@
 "use client";
-import { useState, ChangeEvent } from "react";
+import { useState, ChangeEvent, KeyboardEvent } from "react";
 import { useI18n } from "@/lib/i18n";
 import { Icon } from "@/lib/icons";
 import { numFmt, gradeClass } from "@/lib/format";
+import { computeCourse } from "@/lib/gpa";
 import type { Course, Profile, RiskScore } from "@/lib/types";
 import { PROGRAMS } from "@/lib/programs";
 
@@ -15,16 +16,26 @@ export function CourseRow({ course, onSave }: { course: Course; onSave: (id: str
   const [m, setM] = useState(course.score_midterm ?? "");
   const [f, setF] = useState(course.score_final ?? "");
   const { t } = useI18n();
+  const save = () => onSave(course.id, String(r), String(m), String(f));
+  // Enter in any score cell saves the row (IME-safe), so the total updates without
+  // clicking Save or reloading the page.
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); save(); }
+  };
+  // Live preview: recompute total + letter from what's being typed, instead of
+  // showing the stale saved values until a refetch.
+  const g = computeCourse({ score_regular: String(r), score_midterm: String(m), score_final: String(f), weight_regular: course.weight_regular, weight_midterm: course.weight_midterm, weight_final: course.weight_final });
+  const dirty = String(r) !== String(course.score_regular ?? "") || String(m) !== String(course.score_midterm ?? "") || String(f) !== String(course.score_final ?? "");
   return (
     <tr>
       <td><b>{course.name}</b><div className="muted-note">{course.code || ""}</div></td>
       <td className="mono">{course.credits || 0}</td>
-      <td><input className="cell-in" type="number" step="0.1" min="0" max="10" value={r} onChange={(e) => setR(e.target.value)} /></td>
-      <td><input className="cell-in" type="number" step="0.1" min="0" max="10" value={m} onChange={(e) => setM(e.target.value)} /></td>
-      <td><input className="cell-in" type="number" step="0.1" min="0" max="10" value={f} onChange={(e) => setF(e.target.value)} /></td>
-      <td className="mono strong">{numFmt(course.total_score, 2)}</td>
-      <td><span className={"grade-chip " + gradeClass(course.letter_grade)}>{course.letter_grade || "—"}</span></td>
-      <td><button className="btn btn-sm" onClick={() => onSave(course.id, String(r), String(m), String(f))}>{t("btn.save")}</button></td>
+      <td><input className="cell-in" type="number" step="0.1" min="0" max="10" value={r} onChange={(e) => setR(e.target.value)} onKeyDown={onKey} /></td>
+      <td><input className="cell-in" type="number" step="0.1" min="0" max="10" value={m} onChange={(e) => setM(e.target.value)} onKeyDown={onKey} /></td>
+      <td><input className="cell-in" type="number" step="0.1" min="0" max="10" value={f} onChange={(e) => setF(e.target.value)} onKeyDown={onKey} /></td>
+      <td className="mono strong">{numFmt(g.total, 2)}</td>
+      <td><span className={"grade-chip " + gradeClass(g.letter)}>{g.letter || "—"}</span></td>
+      <td><button className={"btn btn-sm" + (dirty ? " btn-primary" : "")} onClick={save} title={dirty ? t("cls.unsaved") : ""}>{t("btn.save")}</button></td>
     </tr>
   );
 }

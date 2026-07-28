@@ -17,8 +17,10 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  const gmailUser = process.env.GMAIL_USER?.trim();
+  // App passwords are shown grouped ("abcd efgh ijkl mnop"); the spaces would make
+  // SMTP reject the login, so strip whitespace here too.
+  const gmailPass = process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, "");
 
   let body: any;
   try {

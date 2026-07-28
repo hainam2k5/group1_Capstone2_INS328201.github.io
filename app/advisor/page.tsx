@@ -295,6 +295,22 @@ export default function AdvisorPage() {
   const chatRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight; }, [allMsgs, selectedId, activeThread, view]);
 
+  // Remember which view + open student you were on, so reloading (or coming back)
+  // returns you to the same student instead of the whole-list view. Per-tab
+  // (sessionStorage); restored once on mount, then kept in sync.
+  const navReady = useRef(false);
+  useEffect(() => {
+    try {
+      const s = JSON.parse(sessionStorage.getItem("adv.nav") || "{}");
+      if (s.view) setView(s.view as View);
+      if (s.selectedId) setSelectedId(s.selectedId as string);
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    if (!navReady.current) { navReady.current = true; return; } // skip first (pre-restore) run
+    try { sessionStorage.setItem("adv.nav", JSON.stringify({ view, selectedId })); } catch { /* ignore */ }
+  }, [view, selectedId]);
+
   // ------------------------------------------------------------ derived
   const coursesBy = useMemo(() => {
     const m: Record<string, Course[]> = {};

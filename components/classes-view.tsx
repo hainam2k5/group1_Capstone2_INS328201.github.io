@@ -112,19 +112,27 @@ export function ClassesView({ me }: { me: Profile }) {
     if (me.role === "advisor" || me.role === "manager" || me.role === "teacher") {
       const token = (await sb.auth.getSession()).data.session?.access_token;
       const fmt = (v: string) => (v === "" ? "—" : v);
+      // The section name carries the timetable ("Course · Weekday · HH:MM–HH:MM");
+      // the notification and the email should name the course only.
+      const secName = (sel.name || "").split("·")[0].trim() || sel.name;
+      let mailFails = 0;
       await Promise.all(roster.map(async ({ c, s }) => {
         const sr = gVal(c, "sr"), sm = gVal(c, "sm"), sf = gVal(c, "sf");
         const g = computeCourse({ score_regular: sr, score_midterm: sm, score_final: sf, weight_regular: sel.weight_regular, weight_midterm: sel.weight_midterm, weight_final: sel.weight_final });
-        const body = t("notif.gradeBodyDetailed", { course: sel.name, r: fmt(sr), m: fmt(sm), f: fmt(sf), total: g.total === null ? "—" : String(g.total), letter: g.letter || "—" });
+        const body = t("notif.gradeBodyDetailed", { course: secName, r: fmt(sr), m: fmt(sm), f: fmt(sf), total: g.total === null ? "—" : String(g.total), letter: g.letter || "—" });
         await sb.from("notifications").insert({ student_id: s.id, sender_id: me.id, type: "grade", title: t("notif.gradeTitle"), body }); // RLS skips non-advisees
         if (token && s.email && !/@sv\.demo\.edu\.vn$/i.test(s.email)) {
-          void fetch("/api/notify-grade", {
+          // Awaited so a rejected SMTP login (502) is reported instead of failing
+          // silently; the requests still run in parallel across the roster.
+          const ok = await fetch("/api/notify-grade", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ studentId: s.id, courseName: sel.name, r: fmt(sr), m: fmt(sm), f: fmt(sf), total: g.total, letter: g.letter, lang }),
-          }).catch(() => {});
+            body: JSON.stringify({ studentId: s.id, courseName: secName, r: fmt(sr), m: fmt(sm), f: fmt(sf), total: g.total, letter: g.letter, lang }),
+          }).then((r) => r.ok).catch(() => false);
+          if (!ok) mailFails++;
         }
       }));
+      if (mailFails) { setSaving(false); toast(t("cls.gSavedNoMail", { n: mailFails }), "error"); loadRoster(sel, date); return; }
     }
     setSaving(false);
     toast(t("cls.gSaved"), "success");
@@ -142,6 +150,15 @@ export function ClassesView({ me }: { me: Profile }) {
       <Icon name={ic} size={15} /> {t(key)}
     </button>
   );
+
+  // present count for the selected session + short day label for the session chips
+  const dayPresent = roster.reduce((n, { s }) => n + (present[s.id] !== false ? 1 : 0), 0);
+  const fmtDay = (d: string) => d.slice(8, 10) + "/" + d.slice(5, 7);
+  // section names carry the timetable as "Course name · Weekday · HH:MM–HH:MM";
+  // split it so the schedule can be shown on its own line (empty if not set yet).
+  const selParts = (sel?.name || "").split("·").map((x) => x.trim()).filter(Boolean);
+  const selCourse = selParts[0] || "";
+  const selSchedule = selParts.slice(1).join(" · ");
 
   return (
     <>
@@ -165,6 +182,17 @@ export function ClassesView({ me }: { me: Profile }) {
 
       {sel && (
         <div className="card">
+          {/* Class header: code + course name, with the weekly schedule on its own line */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{sel.code} — {selCourse}</div>
+            <div className="card-sub" style={{ marginTop: 3, display: "flex", alignItems: "center", gap: 6 }}>
+              <Icon name="grad" size={13} />
+              {selSchedule && <b style={{ color: "var(--primary)" }}>{selSchedule}</b>}
+              {selSchedule && <span style={{ opacity: 0.5 }}>·</span>}
+              {t("cls.semester")} {sel.semester} · {roster.length} {t("cls.studentsUnit")}
+            </div>
+          </div>
+
           {/* Two tabs for the selected class */}
           <div style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--border, #e5e7eb)", marginBottom: 16 }}>
             {tabBtn("attend", "grad", "cls.tabAttend")}
@@ -172,10 +200,24 @@ export function ClassesView({ me }: { me: Profile }) {
           </div>
 
           {tab === "attend" && (
-            <div className="toolbar" style={{ marginBottom: 14 }}>
-              <label style={{ margin: 0, alignSelf: "center" }}>{t("cls.session")}</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: "auto" }} />
-              <span className="muted-note" style={{ alignSelf: "center" }}>{t("cls.weeklyNote")}</span>
+            <div style={{ marginBottom: 14 }}>
+              <div className="toolbar">
+                <label style={{ margin: 0, alignSelf: "center" }}>{t("cls.session")}</label>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ width: "auto" }} />
+                <span className="muted-note" style={{ alignSelf: "center" }}>{t("cls.weeklyNote")}</span>
+                {roster.length > 0 && <span style={{ alignSelf: "center", marginLeft: "auto", fontSize: 13, fontWeight: 600 }}>{t("cls.dayPresent", { p: dayPresent, n: roster.length })}</span>}
+              </div>
+              {sessionDates.length > 0 && (
+                <div className="chips" style={{ marginTop: 10, alignItems: "center" }}>
+                  <span className="muted-note" style={{ marginRight: 2 }}>{t("cls.sessions")}:</span>
+                  {sessionDates.map((d) => (
+                    <button key={d} type="button" onClick={() => setDate(d)}
+                      className={"chip" + (d === date ? " active" : "")}>
+                      {fmtDay(d)}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
