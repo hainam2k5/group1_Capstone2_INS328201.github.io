@@ -19,6 +19,8 @@ export function ClassesView({ me }: { me: Profile }) {
   const sb = supabase;
   const [tab, setTab] = useState<"attend" | "grades">("attend");
   const [sections, setSections] = useState<Section[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [selId, setSelId] = useState("");
   const [roster, setRoster] = useState<Row[]>([]);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -32,12 +34,28 @@ export function ClassesView({ me }: { me: Profile }) {
 
   async function loadSections() {
     if (!sb) return;
+    setLoading(true);
+    setLoadFailed(false);
+    // Make sure the auth session (JWT) is attached BEFORE querying. On a fresh
+    // load — or right after Supabase silently refreshes an expired token — a
+    // query fired too early goes out without the token, so RLS returns an EMPTY
+    // list. That looked like "no classes to pick" until a manual page reload.
+    // Awaiting getSession() closes that race; a transient error is then retried
+    // a few times so a network blip self-heals instead of forcing an F5.
+    try { await sb.auth.getSession(); } catch {}
     // Each user manages only the classes they own. An advisor may also teach a
     // few classes (owns those sections); they are not meant to run every class.
-    const { data } = await sb.from("sections").select("*").eq("teacher_id", me.id).order("created_at", { ascending: false });
-    const list = (data as Section[]) || [];
+    let ok = false;
+    let list: Section[] = [];
+    for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+      const { data, error } = await sb.from("sections").select("*").eq("teacher_id", me.id).order("created_at", { ascending: false });
+      if (!error) { list = (data as Section[]) || []; ok = true; break; }
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
     setSections(list);
     setSelId((cur) => cur || (list[0]?.id ?? ""));
+    setLoadFailed(!ok);
+    setLoading(false);
   }
   useEffect(() => { loadSections(); }, [me.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -172,12 +190,18 @@ export function ClassesView({ me }: { me: Profile }) {
       <div className="card">
         <div className="field" style={{ maxWidth: 520, marginBottom: 0 }}>
           <label>{t("cls.pickClass")}</label>
-          <select value={selId} onChange={(e) => setSelId(e.target.value)}>
-            <option value="">{t("cls.selectClass")}</option>
+          <select value={selId} onChange={(e) => setSelId(e.target.value)} disabled={loading}>
+            <option value="">{loading ? t("cls.loadingClasses") : t("cls.selectClass")}</option>
             {sections.map((s) => <option key={s.id} value={s.id}>{s.code} — {s.name} · {s.semester}</option>)}
           </select>
         </div>
-        {sections.length === 0 && <div className="muted-note" style={{ marginTop: 10 }}>{t("cls.noClasses")}</div>}
+        {loadFailed && (
+          <button type="button" onClick={() => loadSections()} className="muted-note"
+            style={{ marginTop: 10, background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--primary)", textDecoration: "underline", textAlign: "left" }}>
+            {t("cls.loadErr")}
+          </button>
+        )}
+        {!loading && !loadFailed && sections.length === 0 && <div className="muted-note" style={{ marginTop: 10 }}>{t("cls.noClasses")}</div>}
       </div>
 
       {sel && (
