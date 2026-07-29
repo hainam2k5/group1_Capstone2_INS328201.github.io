@@ -105,6 +105,10 @@ export default function LoginPage() {
                 <img
                   src={s.src}
                   alt=""
+                  // Probe slide 1 via onLoad; also confirm here in case it loaded
+                  // from cache before React attached onLoad (else slidesOk stays
+                  // null and slides 2–4 never render).
+                  ref={i === 0 ? (el) => { if (el && el.complete && el.naturalWidth > 0) setSlidesOk(true); } : undefined}
                   onLoad={i === 0 ? () => setSlidesOk(true) : undefined}
                   onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; if (i === 0) setSlidesOk(false); }}
                 />
