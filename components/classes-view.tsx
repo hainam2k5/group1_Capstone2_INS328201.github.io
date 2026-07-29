@@ -53,7 +53,9 @@ export function ClassesView({ me }: { me: Profile }) {
       await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
     }
     setSections(list);
-    setSelId((cur) => cur || (list[0]?.id ?? ""));
+    // Land on the class picker instead of auto-opening a class — the user chooses
+    // which class to work on. Keep an existing selection only if it still exists.
+    setSelId((cur) => (cur && list.some((s) => s.id === cur) ? cur : ""));
     setLoadFailed(!ok);
     setLoading(false);
   }
