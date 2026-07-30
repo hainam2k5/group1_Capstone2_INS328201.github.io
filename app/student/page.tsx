@@ -25,6 +25,10 @@ export default function StudentPage() {
   const [appts, setAppts] = useState<Appointment[]>([]);
   const [apptWhen, setApptWhen] = useState("");
   const [apptNote, setApptNote] = useState("");
+  // Earliest bookable slot: right now (local) — no booking a time in the past.
+  const apptMinDate = new Date();
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  const apptMin = `${apptMinDate.getFullYear()}-${pad2(apptMinDate.getMonth() + 1)}-${pad2(apptMinDate.getDate())}T${pad2(apptMinDate.getHours())}:${pad2(apptMinDate.getMinutes())}`;
   const notifRef = useRef<HTMLDivElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
 
@@ -125,6 +129,8 @@ export default function StudentPage() {
     if (!supabase || !me) return;
     if (!me.advisor_id) return toast(t("student.notAssigned"), "error");
     if (!apptWhen) return toast(t("appt.pickTime"), "error");
+    const nowFloor = new Date(); nowFloor.setSeconds(0, 0);
+    if (new Date(apptWhen).getTime() < nowFloor.getTime()) return toast(t("appt.past"), "error");
     const { error } = await supabase.from("appointments").insert({
       student_id: me.id, advisor_id: me.advisor_id, starts_at: new Date(apptWhen).toISOString(),
       note: apptNote.trim(), status: "requested",
@@ -326,7 +332,7 @@ export default function StudentPage() {
                 <>
                   <form onSubmit={bookAppt}>
                     <div className="field"><label>{t("appt.when")}</label>
-                      <input type="datetime-local" value={apptWhen} onChange={(e) => setApptWhen(e.target.value)} /></div>
+                      <input type="datetime-local" min={apptMin} value={apptWhen} onChange={(e) => setApptWhen(e.target.value)} /></div>
                     <div className="field"><label>{t("appt.note")}</label>
                       <input type="text" value={apptNote} onChange={(e) => setApptNote(e.target.value)} placeholder={t("appt.notePh")} /></div>
                     <button className="btn btn-primary btn-block" type="submit">{t("appt.book")}</button>
