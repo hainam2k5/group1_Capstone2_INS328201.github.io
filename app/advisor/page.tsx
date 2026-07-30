@@ -241,17 +241,24 @@ export default function AdvisorPage() {
         setMsgTick((x) => x + 1);
       })
       .subscribe();
+    // Coalesce bursts (a batched recompute touches many rows; saving grades
+    // updates a whole roster) into a single reload ~400 ms later.
+    const bumpReload = () => {
+      if (reloadRef.current) clearTimeout(reloadRef.current);
+      reloadRef.current = setTimeout(() => { loadCore(); }, 400);
+    };
     const chAlerts = sb.channel("rt-adv-alerts")
-      .on("postgres_changes", { event: "*", schema: "public", table: "alerts" }, () => {
-        // Coalesce bursts: a batched recompute inserts many alert rows, and each
-        // row fires this event. Without debouncing that meant one full reload PER
-        // alert — the main cause of a slow "Recompute". Collapse into one reload.
-        if (reloadRef.current) clearTimeout(reloadRef.current);
-        reloadRef.current = setTimeout(() => { loadCore(); }, 400);
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "alerts" }, bumpReload)
+      .subscribe();
+    // Grades (courses) + risk scores changing → refresh the dashboard live, so
+    // recording grades no longer needs a manual page reload. Both tables are
+    // already in the supabase_realtime publication (see schema.sql).
+    const chData = sb.channel("rt-adv-data")
+      .on("postgres_changes", { event: "*", schema: "public", table: "courses" }, bumpReload)
+      .on("postgres_changes", { event: "*", schema: "public", table: "risk_scores" }, bumpReload)
       .subscribe();
 
-    return () => { active = false; if (reloadRef.current) clearTimeout(reloadRef.current); sb.removeChannel(chMsg); sb.removeChannel(chAlerts); };
+    return () => { active = false; if (reloadRef.current) clearTimeout(reloadRef.current); sb.removeChannel(chMsg); sb.removeChannel(chAlerts); sb.removeChannel(chData); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
 
