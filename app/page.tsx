@@ -26,9 +26,13 @@ export default function LoginPage() {
   // Slide photos are optional. Probe only slide 1; load the rest only if it
   // exists — otherwise every visit fires 4 broken-image requests.
   const [slidesOk, setSlidesOk] = useState<boolean | null>(null);
+  // Only the current slide (plus the next one, preloaded) actually downloads;
+  // the remaining campus photos load lazily as the carousel reaches them, so the
+  // first paint isn't blocked by ~0.7 MB of images arriving all at once.
+  const [maxSeen, setMaxSeen] = useState(0);
 
   useEffect(() => {
-    const id = setInterval(() => setSlide((s) => (s + 1) % SLIDES.length), 5000);
+    const id = setInterval(() => setSlide((s) => { const n = (s + 1) % SLIDES.length; setMaxSeen((m) => Math.max(m, n)); return n; }), 5000);
     return () => clearInterval(id);
   }, []);
 
@@ -100,11 +104,13 @@ export default function LoginPage() {
         <div className="abp-carousel" aria-hidden="true">
           {SLIDES.map((s, i) => (
             <div key={i} className={"abp-slide" + (i === slide ? " active" : "")} style={{ backgroundImage: s.grad }}>
-              {(i === 0 ? slidesOk !== false : slidesOk === true) && (
+              {(i === 0 ? slidesOk !== false : slidesOk === true && i <= maxSeen + 1) && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={s.src}
                   alt=""
+                  loading={i === 0 ? "eager" : "lazy"}
+                  decoding="async"
                   // Probe slide 1 via onLoad; also confirm here in case it loaded
                   // from cache before React attached onLoad (else slidesOk stays
                   // null and slides 2–4 never render).
@@ -141,7 +147,7 @@ export default function LoginPage() {
         <div className="abp-dots" role="tablist" aria-label="Ảnh giới thiệu">
           {SLIDES.map((_, i) => (
             <button key={i} type="button" className={"abp-dot" + (i === slide ? " active" : "")}
-              aria-label={"Ảnh " + (i + 1)} aria-selected={i === slide} role="tab" onClick={() => setSlide(i)} />
+              aria-label={"Ảnh " + (i + 1)} aria-selected={i === slide} role="tab" onClick={() => { setSlide(i); setMaxSeen((m) => Math.max(m, i)); }} />
           ))}
         </div>
       </aside>
