@@ -30,6 +30,8 @@ export default function AdvisorPage() {
 
   const [me, setMe] = useState<Profile | null>(null);
   const [ready, setReady] = useState(false);
+  // Debounce timer so a burst of realtime alert events collapses into one reload.
+  const reloadRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [students, setStudents] = useState<Profile[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
@@ -190,7 +192,9 @@ export default function AdvisorPage() {
     return true;
   }
   async function recomputeAll() {
-    const core = await fetchCore();
+    // Score the data already in state instead of re-fetching every table first:
+    // one refresh (loadCore) at the end is enough, halving the round-trips.
+    const core: Core = { students, courses, risks, alerts, interventions, msgUnread };
     const outs = core.students.map((s) => computeOutcome(s, core, riskCfg)).filter((o): o is Outcome => o !== null);
     await persistOutcomes(outs);
     await loadCore();
@@ -238,10 +242,16 @@ export default function AdvisorPage() {
       })
       .subscribe();
     const chAlerts = sb.channel("rt-adv-alerts")
-      .on("postgres_changes", { event: "*", schema: "public", table: "alerts" }, () => { loadCore(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "alerts" }, () => {
+        // Coalesce bursts: a batched recompute inserts many alert rows, and each
+        // row fires this event. Without debouncing that meant one full reload PER
+        // alert — the main cause of a slow "Recompute". Collapse into one reload.
+        if (reloadRef.current) clearTimeout(reloadRef.current);
+        reloadRef.current = setTimeout(() => { loadCore(); }, 400);
+      })
       .subscribe();
 
-    return () => { active = false; sb.removeChannel(chMsg); sb.removeChannel(chAlerts); };
+    return () => { active = false; if (reloadRef.current) clearTimeout(reloadRef.current); sb.removeChannel(chMsg); sb.removeChannel(chAlerts); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
 
