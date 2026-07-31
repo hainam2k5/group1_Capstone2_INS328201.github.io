@@ -23,12 +23,17 @@ export default function StudentPage() {
   const [advisor, setAdvisor] = useState<Profile | null>(null);
   const [draft, setDraft] = useState("");
   const [appts, setAppts] = useState<Appointment[]>([]);
-  const [apptWhen, setApptWhen] = useState("");
+  const [apptDate, setApptDate] = useState("");
+  const [apptSlot, setApptSlot] = useState("");
   const [apptNote, setApptNote] = useState("");
-  // Earliest bookable slot: right now (local) — no booking a time in the past.
-  const apptMinDate = new Date();
+  // Appointments are booked in FIXED slots (tidy times, fewer clashes) and never
+  // in the past. Edit APPT_SLOTS to change the offered times.
+  const APPT_SLOTS = ["08:00", "09:00", "10:00", "11:00", "14:00", "15:00", "16:00"];
   const pad2 = (n: number) => String(n).padStart(2, "0");
-  const apptMin = `${apptMinDate.getFullYear()}-${pad2(apptMinDate.getMonth() + 1)}-${pad2(apptMinDate.getDate())}T${pad2(apptMinDate.getHours())}:${pad2(apptMinDate.getMinutes())}`;
+  const _now = new Date();
+  const apptMinDay = `${_now.getFullYear()}-${pad2(_now.getMonth() + 1)}-${pad2(_now.getDate())}`;
+  // On today's date, hide slots whose time has already passed.
+  const slotAvailable = (s: string) => apptDate !== apptMinDay || new Date(`${apptDate}T${s}`).getTime() >= Date.now();
   const notifRef = useRef<HTMLDivElement | null>(null);
   const chatRef = useRef<HTMLDivElement | null>(null);
 
@@ -128,15 +133,16 @@ export default function StudentPage() {
     e.preventDefault();
     if (!supabase || !me) return;
     if (!me.advisor_id) return toast(t("student.notAssigned"), "error");
-    if (!apptWhen) return toast(t("appt.pickTime"), "error");
+    if (!apptDate || !apptSlot) return toast(t("appt.pickTime"), "error");
+    const when = new Date(`${apptDate}T${apptSlot}`);
     const nowFloor = new Date(); nowFloor.setSeconds(0, 0);
-    if (new Date(apptWhen).getTime() < nowFloor.getTime()) return toast(t("appt.past"), "error");
+    if (when.getTime() < nowFloor.getTime()) return toast(t("appt.past"), "error");
     const { error } = await supabase.from("appointments").insert({
-      student_id: me.id, advisor_id: me.advisor_id, starts_at: new Date(apptWhen).toISOString(),
+      student_id: me.id, advisor_id: me.advisor_id, starts_at: when.toISOString(),
       note: apptNote.trim(), status: "requested",
     });
     if (error) return toast(t("appt.err"), "error");
-    setApptWhen(""); setApptNote("");
+    setApptDate(""); setApptSlot(""); setApptNote("");
     toast(t("appt.requested"), "success");
     reloadAppts(me.id);
   }
@@ -331,8 +337,13 @@ export default function StudentPage() {
               {me.advisor_id ? (
                 <>
                   <form onSubmit={bookAppt}>
-                    <div className="field"><label>{t("appt.when")}</label>
-                      <input type="datetime-local" min={apptMin} value={apptWhen} onChange={(e) => setApptWhen(e.target.value)} /></div>
+                    <div className="field"><label>{t("appt.date")}</label>
+                      <input type="date" min={apptMinDay} value={apptDate} onChange={(e) => { setApptDate(e.target.value); setApptSlot(""); }} /></div>
+                    <div className="field"><label>{t("appt.slot")}</label>
+                      <select value={apptSlot} onChange={(e) => setApptSlot(e.target.value)} disabled={!apptDate}>
+                        <option value="">{t("appt.pickSlot")}</option>
+                        {APPT_SLOTS.filter(slotAvailable).map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select></div>
                     <div className="field"><label>{t("appt.note")}</label>
                       <input type="text" value={apptNote} onChange={(e) => setApptNote(e.target.value)} placeholder={t("appt.notePh")} /></div>
                     <button className="btn btn-primary btn-block" type="submit">{t("appt.book")}</button>
