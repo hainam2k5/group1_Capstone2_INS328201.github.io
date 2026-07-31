@@ -741,6 +741,10 @@ export default function AdvisorPage() {
   const setCfg = (k: keyof RiskConfig, v: number) => setRiskCfg((p) => ({ ...p, [k]: v }));
   async function saveConfig() {
     if (!sb || me?.role !== "manager") return;
+    // The 4 factor weights must total exactly 1 (100%), else the composite score
+    // is mis-scaled. Block the save and ask the manager to fix them.
+    const wSum = riskCfg.w_gpa + riskCfg.w_att + riskCfg.w_lms + riskCfg.w_fail;
+    if (Math.abs(wSum - 1) > 0.001) return toast(t("cfg.weightErr"), "error");
     setCfgSaving(true);
     const { error } = await sb.from("risk_config").update({
       w_gpa: riskCfg.w_gpa, w_att: riskCfg.w_att, w_lms: riskCfg.w_lms, w_fail: riskCfg.w_fail,
@@ -754,6 +758,7 @@ export default function AdvisorPage() {
   const renderConfigCard = () => {
     const isMgr = me?.role === "manager";
     const wSum = riskCfg.w_gpa + riskCfg.w_att + riskCfg.w_lms + riskCfg.w_fail;
+    const wOff = Math.abs(wSum - 1) > 0.001; // weights must total exactly 1
     const numField = (label: string, k: keyof RiskConfig, step: string) => (
       <div className="field"><label>{label}</label>
         <input type="number" step={step} min="0" value={riskCfg[k]} disabled={!isMgr} onChange={(e) => setCfg(k, numOr(e.target.value, 0))} /></div>
@@ -767,14 +772,15 @@ export default function AdvisorPage() {
           {numField(t("factor.gpa"), "w_gpa", "0.05")}{numField(t("factor.att"), "w_att", "0.05")}
           {numField(t("factor.lms"), "w_lms", "0.05")}{numField(t("factor.fail"), "w_fail", "0.05")}
         </div>
-        <div className="muted-note" style={{ marginTop: -4, marginBottom: 10 }}>{t("cfg.weightSum", { sum: wSum.toFixed(2) })}</div>
+        <div className="muted-note" style={{ marginTop: -4, marginBottom: 10, color: wOff ? "#c02626" : undefined, fontWeight: wOff ? 600 : undefined }}>
+          {t("cfg.weightSum", { sum: wSum.toFixed(2) })}{wOff ? " — " + t("cfg.weightErr") : ""}</div>
         <div className="card-sub" style={{ marginBottom: 6 }}>{t("cfg.thresholds")}</div>
         <div className="field-grid">
           {numField(t("risk.Medium"), "th_medium", "1")}{numField(t("risk.High"), "th_high", "1")}{numField(t("risk.Critical"), "th_critical", "1")}
         </div>
         {isMgr && (
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
-            <button className="btn btn-primary" disabled={cfgSaving} onClick={saveConfig}>{cfgSaving ? t("loading") : t("cfg.save")}</button>
+            <button className="btn btn-primary" disabled={cfgSaving || wOff} onClick={saveConfig}>{cfgSaving ? t("loading") : t("cfg.save")}</button>
             <span className="muted-note">{t("cfg.applyNote")}</span>
           </div>
         )}

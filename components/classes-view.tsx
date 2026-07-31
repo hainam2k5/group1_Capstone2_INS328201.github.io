@@ -5,6 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import { Icon } from "@/lib/icons";
 import { computeCourse } from "@/lib/gpa";
+import { examBan } from "@/lib/attendance";
 import type { Profile, Section, Course, Attendance } from "@/lib/types";
 
 type Row = { c: Course; s: Profile };
@@ -96,7 +97,33 @@ export function ClassesView({ me }: { me: Profile }) {
     setSaving(false);
     if (error) return toast(t("cls.attErr"), "error");
     toast(t("cls.attSaved"), "success");
+    await notifyExamBans(sel);
     loadRoster(sel, date);
+  }
+
+  // After saving attendance, notify students who JUST crossed the exam-ban limit
+  // (absent > credits). Compares the pre-save rates in state with a fresh fetch,
+  // so each student is warned only once — the moment they become barred.
+  async function notifyExamBans(sec: Section) {
+    if (!sb) return;
+    const cr = Number(sec.credits) || 3;
+    const rows = ((await sb.from("attendance").select("student_id, present").eq("section_id", sec.id)).data as { student_id: string; present: boolean }[]) || [];
+    const now: Record<string, { pre: number; tot: number }> = {};
+    for (const a of rows) { const x = now[a.student_id] || { pre: 0, tot: 0 }; x.tot++; if (a.present) x.pre++; now[a.student_id] = x; }
+    const secName = (sec.name || "").split("·")[0].trim() || sec.name;
+    const token = (await sb.auth.getSession()).data.session?.access_token;
+    for (const { s } of roster) {
+      const o = rates[s.id], n = now[s.id];
+      const wasBanned = o ? examBan(o.pre, o.tot, cr).banned : false;
+      const nb = n ? examBan(n.pre, n.tot, cr) : null;
+      if (nb && nb.banned && !wasBanned) {
+        const body = t("cls.banBody", { course: secName, absent: nb.absent });
+        await sb.from("notifications").insert({ student_id: s.id, sender_id: me.id, type: "alert", title: t("cls.banTitle"), body }); // RLS skips non-recipients
+        if (token && s.email && !/@sv\.demo\.edu\.vn$/i.test(s.email)) {
+          void fetch("/api/notify-alert", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ studentId: s.id, level: "Critical", lang }) }).catch(() => {});
+        }
+      }
+    }
   }
 
   const gVal = (c: Course, f: "sr" | "sm" | "sf") => {
@@ -179,6 +206,15 @@ export function ClassesView({ me }: { me: Profile }) {
   const selParts = (sel?.name || "").split("·").map((x) => x.trim()).filter(Boolean);
   const selCourse = selParts[0] || "";
   const selSchedule = selParts.slice(1).join(" · ");
+  // Exam-ban ("cấm thi") status per student, from their attendance in this class.
+  const secCredits = Number(sel?.credits) || 3;
+  const banOf = (sid: string) => { const r = rates[sid]; return examBan(r?.pre ?? 0, r?.tot ?? 0, secCredits); };
+  const examBadge = (kind: "ban" | "near") => (
+    <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 10,
+      color: kind === "ban" ? "#fff" : "#8a6d1a", background: kind === "ban" ? "#c02626" : "#fbf0dc" }}>
+      {t(kind === "ban" ? "cls.examBan" : "cls.examBanNear")}
+    </span>
+  );
 
   return (
     <>
@@ -257,9 +293,10 @@ export function ClassesView({ me }: { me: Profile }) {
                   <tbody>
                     {roster.map(({ s }) => {
                       const r = rates[s.id]; const rate = r && r.tot ? Math.round((r.pre / r.tot) * 100) : null;
+                      const b = banOf(s.id);
                       return (
                         <tr key={s.id}>
-                          <td><b>{s.full_name}</b></td><td className="mono">{s.student_code || "—"}</td>
+                          <td><b>{s.full_name}</b>{b.banned ? examBadge("ban") : b.near ? examBadge("near") : null}</td><td className="mono">{s.student_code || "—"}</td>
                           <td style={{ textAlign: "center" }}>
                             <input type="checkbox" checked={present[s.id] !== false} onChange={(e) => setPresent((p) => ({ ...p, [s.id]: e.target.checked }))} style={{ width: 18, height: 18 }} />
                           </td>
@@ -284,14 +321,15 @@ export function ClassesView({ me }: { me: Profile }) {
                     {roster.map(({ c, s }) => {
                       const sr = gVal(c, "sr"), sm = gVal(c, "sm"), sf = gVal(c, "sf");
                       const g = computeCourse({ score_regular: sr, score_midterm: sm, score_final: sf, weight_regular: sel.weight_regular, weight_midterm: sel.weight_midterm, weight_final: sel.weight_final });
+                      const b = banOf(s.id);
                       return (
                         <tr key={c.id}>
-                          <td><b>{s.full_name}</b></td><td className="mono">{s.student_code || "—"}</td>
+                          <td><b>{s.full_name}</b>{b.banned ? examBadge("ban") : b.near ? examBadge("near") : null}</td><td className="mono">{s.student_code || "—"}</td>
                           <td><input className="cell-in" inputMode="decimal" value={sr} onChange={(e) => setG(c.id, "sr", e.target.value)} /></td>
                           <td><input className="cell-in" inputMode="decimal" value={sm} onChange={(e) => setG(c.id, "sm", e.target.value)} /></td>
-                          <td><input className="cell-in" inputMode="decimal" value={sf} onChange={(e) => setG(c.id, "sf", e.target.value)} /></td>
-                          <td className="mono">{g.total === null ? "—" : g.total}</td>
-                          <td><span className={"grade-chip grade-" + (g.letter || "").replace("+", "p")}>{g.letter || "—"}</span></td>
+                          <td>{b.banned ? <span className="muted-note" style={{ color: "#c02626", fontWeight: 700 }} title={t("cls.examBanFinal")}>{t("cls.examBan")}</span> : <input className="cell-in" inputMode="decimal" value={sf} onChange={(e) => setG(c.id, "sf", e.target.value)} />}</td>
+                          <td className="mono">{b.banned ? "—" : g.total === null ? "—" : g.total}</td>
+                          <td>{b.banned ? <span className="grade-chip grade-F">{t("cls.examBan")}</span> : <span className={"grade-chip grade-" + (g.letter || "").replace("+", "p")}>{g.letter || "—"}</span>}</td>
                         </tr>
                       );
                     })}

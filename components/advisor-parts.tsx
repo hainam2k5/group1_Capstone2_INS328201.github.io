@@ -46,6 +46,10 @@ export function AddCourseForm({ onAdd }: { onAdd: (c: NewCourse) => void }) {
   const { t } = useI18n();
   const [v, setV] = useState<NewCourse>({ code: "", name: "", credits: "3", semester: "", year: "", wr: "0.2", wm: "0.3", wf: "0.5", sr: "", sm: "", sf: "" });
   const up = (k: keyof NewCourse) => (e: ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: e.target.value });
+  // TX + GK + CK weights must total exactly 1, else the computed grade is
+  // mis-scaled (can exceed 10) — block "Add course" until they do.
+  const wSum = (Number(v.wr) || 0) + (Number(v.wm) || 0) + (Number(v.wf) || 0);
+  const wOff = Math.abs(wSum - 1) > 0.001;
   return (
     <>
       <div className="field-grid-2">
@@ -62,12 +66,14 @@ export function AddCourseForm({ onAdd }: { onAdd: (c: NewCourse) => void }) {
         <div className="field"><label>{t("label.wMid")}</label><input type="number" value={v.wm} onChange={up("wm")} step="0.05" min="0" max="1" /></div>
         <div className="field"><label>{t("label.wFin")}</label><input type="number" value={v.wf} onChange={up("wf")} step="0.05" min="0" max="1" /></div>
       </div>
+      <div className="muted-note" style={{ marginTop: -4, marginBottom: 8, color: wOff ? "#c02626" : undefined, fontWeight: wOff ? 600 : undefined }}>
+        {t("cfg.weightSum", { sum: wSum.toFixed(2) })}{wOff ? " — " + t("cfg.weightErr") : ""}</div>
       <div className="field-grid">
         <div className="field"><label>{t("label.sReg")}</label><input type="number" value={v.sr} onChange={up("sr")} step="0.1" min="0" max="10" /></div>
         <div className="field"><label>{t("label.sMid")}</label><input type="number" value={v.sm} onChange={up("sm")} step="0.1" min="0" max="10" /></div>
         <div className="field"><label>{t("label.sFin")}</label><input type="number" value={v.sf} onChange={up("sf")} step="0.1" min="0" max="10" /></div>
       </div>
-      <button className="btn btn-primary btn-sm" onClick={() => onAdd(v)}>{t("btn.addCourse")}</button>
+      <button className="btn btn-primary btn-sm" disabled={wOff} onClick={() => onAdd(v)}>{t("btn.addCourse")}</button>
       <div className="muted-note" style={{ marginTop: 8 }}>{t("note.weights")}</div>
     </>
   );
