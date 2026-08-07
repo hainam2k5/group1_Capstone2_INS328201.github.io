@@ -106,7 +106,6 @@ export function ClassesView({ me }: { me: Profile }) {
   // so each student is warned only once — the moment they become barred.
   async function notifyExamBans(sec: Section) {
     if (!sb) return;
-    const cr = Number(sec.credits) || 3;
     const rows = ((await sb.from("attendance").select("student_id, present").eq("section_id", sec.id)).data as { student_id: string; present: boolean }[]) || [];
     const now: Record<string, { pre: number; tot: number }> = {};
     for (const a of rows) { const x = now[a.student_id] || { pre: 0, tot: 0 }; x.tot++; if (a.present) x.pre++; now[a.student_id] = x; }
@@ -114,8 +113,8 @@ export function ClassesView({ me }: { me: Profile }) {
     const token = (await sb.auth.getSession()).data.session?.access_token;
     for (const { s } of roster) {
       const o = rates[s.id], n = now[s.id];
-      const wasBanned = o ? examBan(o.pre, o.tot, cr).banned : false;
-      const nb = n ? examBan(n.pre, n.tot, cr) : null;
+      const wasBanned = o ? examBan(o.pre, o.tot).banned : false;
+      const nb = n ? examBan(n.pre, n.tot) : null;
       if (nb && nb.banned && !wasBanned) {
         const body = t("cls.banBody", { course: secName, absent: nb.absent });
         await sb.from("notifications").insert({ student_id: s.id, sender_id: me.id, type: "alert", title: t("cls.banTitle"), body }); // RLS skips non-recipients
@@ -207,8 +206,7 @@ export function ClassesView({ me }: { me: Profile }) {
   const selCourse = selParts[0] || "";
   const selSchedule = selParts.slice(1).join(" · ");
   // Exam-ban ("cấm thi") status per student, from their attendance in this class.
-  const secCredits = Number(sel?.credits) || 3;
-  const banOf = (sid: string) => { const r = rates[sid]; return examBan(r?.pre ?? 0, r?.tot ?? 0, secCredits); };
+  const banOf = (sid: string) => { const r = rates[sid]; return examBan(r?.pre ?? 0, r?.tot ?? 0); };
   const examBadge = (kind: "ban" | "near") => (
     <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 10,
       color: kind === "ban" ? "#fff" : "#8a6d1a", background: kind === "ban" ? "#c02626" : "#fbf0dc" }}>
