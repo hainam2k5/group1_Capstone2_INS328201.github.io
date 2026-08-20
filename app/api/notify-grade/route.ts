@@ -96,6 +96,11 @@ export async function POST(req: Request) {
     port: 465,
     secure: true,
     auth: { user: gmailUser, pass: gmailPass },
+    // Fail fast on a slow or wrong SMTP login instead of hanging on the default
+    // socket timeout — keeps background grade emails from piling up.
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 12000,
   });
   try {
     const info = await transporter.sendMail({

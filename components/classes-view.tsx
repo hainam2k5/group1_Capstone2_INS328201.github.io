@@ -151,38 +151,42 @@ export function ClassesView({ me }: { me: Profile }) {
     });
     const res = await Promise.all(ups);
     if (res.filter((r) => r.error).length) { setSaving(false); return toast(t("cls.gErr"), "error"); }
-    // Best-effort: notify + email each student their updated grade. Allowed for a
-    // teacher (own class), advisor, or manager — the notify-grade route and the
-    // notifications RLS both permit these roles. Demo addresses (@sv.demo.edu.vn)
-    // are skipped so we don't send to fake inboxes.
+    // Grades are saved — tell the user immediately. Notifications + emails are
+    // best-effort and run in the background so a slow or failed SMTP login can
+    // never block saving (awaiting them caused the long "Saving…" spinners).
+    setSaving(false);
+    toast(t("cls.gSaved"), "success");
+    loadRoster(sel, date);
     if (me.role === "advisor" || me.role === "manager" || me.role === "teacher") {
-      const token = (await sb.auth.getSession()).data.session?.access_token;
       const fmt = (v: string) => (v === "" ? "—" : v);
       // The section name carries the timetable ("Course · Weekday · HH:MM–HH:MM");
       // the notification and the email should name the course only.
       const secName = (sel.name || "").split("·")[0].trim() || sel.name;
-      let mailFails = 0;
-      await Promise.all(roster.map(async ({ c, s }) => {
+      // One batched notification insert instead of one round-trip per student.
+      const notifRows = roster.map(({ c, s }) => {
         const sr = gVal(c, "sr"), sm = gVal(c, "sm"), sf = gVal(c, "sf");
         const g = computeCourse({ score_regular: sr, score_midterm: sm, score_final: sf, weight_regular: sel.weight_regular, weight_midterm: sel.weight_midterm, weight_final: sel.weight_final });
         const body = t("notif.gradeBodyDetailed", { course: secName, r: fmt(sr), m: fmt(sm), f: fmt(sf), total: g.total === null ? "—" : String(g.total), letter: g.letter || "—" });
-        await sb.from("notifications").insert({ student_id: s.id, sender_id: me.id, type: "grade", title: t("notif.gradeTitle"), body }); // RLS skips non-advisees
-        if (token && s.email && !/@sv\.demo\.edu\.vn$/i.test(s.email)) {
-          // Awaited so a rejected SMTP login (502) is reported instead of failing
-          // silently; the requests still run in parallel across the roster.
-          const ok = await fetch("/api/notify-grade", {
+        return { student_id: s.id, sender_id: me.id, type: "grade", title: t("notif.gradeTitle"), body };
+      });
+      void (async () => {
+        if (notifRows.length) await sb.from("notifications").insert(notifRows); // RLS skips non-advisees
+        const token = (await sb.auth.getSession()).data.session?.access_token;
+        if (!token) return;
+        // Fire-and-forget one email per real address — never awaited, so a slow or
+        // failed SMTP login cannot delay the save (demo addresses are skipped).
+        for (const { c, s } of roster) {
+          if (!s.email || /@sv\.demo\.edu\.vn$/i.test(s.email)) continue;
+          const sr = gVal(c, "sr"), sm = gVal(c, "sm"), sf = gVal(c, "sf");
+          const g = computeCourse({ score_regular: sr, score_midterm: sm, score_final: sf, weight_regular: sel.weight_regular, weight_midterm: sel.weight_midterm, weight_final: sel.weight_final });
+          void fetch("/api/notify-grade", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             body: JSON.stringify({ studentId: s.id, courseName: secName, r: fmt(sr), m: fmt(sm), f: fmt(sf), total: g.total, letter: g.letter, lang }),
-          }).then((r) => r.ok).catch(() => false);
-          if (!ok) mailFails++;
+          }).catch(() => {});
         }
-      }));
-      if (mailFails) { setSaving(false); toast(t("cls.gSavedNoMail", { n: mailFails }), "error"); loadRoster(sel, date); return; }
+      })().catch(() => {});
     }
-    setSaving(false);
-    toast(t("cls.gSaved"), "success");
-    loadRoster(sel, date);
   }
 
   const tabBtn = (tb: "attend" | "grades", ic: string, key: string) => (
